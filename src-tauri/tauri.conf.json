@@ -1,7 +1,7 @@
 {
   "productName": "Metadata Cleaner",
   "version": "0.1.0",
-  "identifier": "com.metadata-cleaner.app",
+  "identifier": "com.flense.app",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
