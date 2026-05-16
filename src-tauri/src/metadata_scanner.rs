@@ -1,6 +1,8 @@
 // src-tauri/src/metadata_scanner.rs
 // Native metadata scanning for all supported formats.
 
+use id3::TagLike;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufReader;
@@ -23,9 +25,12 @@ const VIDEO_EXTENSIONS: &[&str] = &["mp4", "avi", "mkv", "mov", "wmv", "webm", "
 const DOCUMENT_EXTENSIONS: &[&str] = &["docx", "xlsx", "pptx", "odt", "ods", "odp"];
 
 const ALL_SUPPORTED: &[&str] = &[
-    IMAGE_EXTENSIONS, PDF_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, DOCUMENT_EXTENSIONS,
-]
-.concat();
+    "jpg", "jpeg", "png", "tiff", "tif", "webp", "bmp",
+    "pdf",
+    "mp3", "flac", "ogg", "wav", "m4a", "aac", "wma",
+    "mp4", "avi", "mkv", "mov", "wmv", "webm", "m4v",
+    "docx", "xlsx", "pptx", "odt", "ods", "odp",
+];
 
 pub fn detect_file_type(path: &Path) -> FileType {
     let ext = path
@@ -158,6 +163,7 @@ fn scan_image(
     } else {
         SupportLevel::Partial
     };
+    let summary = build_category_summary(&items);
 
     FileScanResult {
         file_path: path_str.to_string(),
@@ -166,7 +172,7 @@ fn scan_image(
         last_modified,
         support_level,
         metadata_items: items,
-        category_summary: build_category_summary(&items),
+        category_summary: summary,
         errors,
         warnings,
     }
@@ -188,24 +194,22 @@ fn scan_exif_native(path: &Path) -> AppResult<Vec<MetadataItem>> {
         ))
     })?;
     let mut items = Vec::new();
-    for ifd in &[exif::In::PRIMARY, exif::In::EXIF, exif::In::GPS] {
-        for f in exif.fields().filter(|f| f.ifd_num == *ifd) {
-            let tag_name = f.tag.to_string();
-            let value = f.display_value().with_unit(&exif).to_string();
-            let category = if *ifd == exif::In::GPS {
-                MetadataCategory::Gps
-            } else {
-                MetadataCategory::Exif
-            };
-            items.push(MetadataItem {
-                key: tag_name,
-                value: value.chars().take(200).collect(),
-                category,
-                capability: RemovalCapability::Removable,
-                selected: true,
-                warning: None,
-            });
-        }
+    for f in exif.fields() {
+        let tag_name = f.tag.to_string();
+        let value = f.display_value().with_unit(&exif).to_string();
+        let category = if tag_name.starts_with("GPS") {
+            MetadataCategory::Gps
+        } else {
+            MetadataCategory::Exif
+        };
+        items.push(MetadataItem {
+            key: tag_name,
+            value: value.chars().take(200).collect(),
+            category,
+            capability: RemovalCapability::Removable,
+            selected: true,
+            warning: None,
+        });
     }
     Ok(items)
 }
@@ -349,17 +353,16 @@ fn scan_pdf(
                     }
                 }
             }
-            if let Ok(xmp) = doc.get_xmp_metadata() {
-                if !xmp.is_empty() {
-                    items.push(MetadataItem {
-                        key: "XMP Metadata".to_string(),
-                        value: "XMP metadata stream detected".to_string(),
-                        category: MetadataCategory::Xmp,
-                        capability: RemovalCapability::Partial,
-                        selected: true,
-                        warning: Some("XMP removal may affect PDF/A compliance".to_string()),
-                    });
-                }
+            let has_xmp = doc.trailer.get(b"Metadata").is_ok();
+            if has_xmp {
+                items.push(MetadataItem {
+                    key: "XMP Metadata".to_string(),
+                    value: "XMP metadata stream detected".to_string(),
+                    category: MetadataCategory::Xmp,
+                    capability: RemovalCapability::Partial,
+                    selected: true,
+                    warning: Some("XMP removal may affect PDF/A compliance".to_string()),
+                });
             }
             if has_embedded_files(&doc) {
                 warnings.push("PDF contains embedded objects — deep cleaning is not supported. Embedded metadata will not be removed.".to_string());
@@ -377,6 +380,7 @@ fn scan_pdf(
     } else {
         SupportLevel::Partial
     };
+    let summary = build_category_summary(&items);
 
     FileScanResult {
         file_path: path_str.to_string(),
@@ -385,14 +389,14 @@ fn scan_pdf(
         last_modified,
         support_level,
         metadata_items: items,
-        category_summary: build_category_summary(&items),
+        category_summary: summary,
         errors,
         warnings,
     }
 }
 
 fn scan_pdf_dict(dict: &lopdf::Dictionary, items: &mut Vec<MetadataItem>) {
-    let pdf_keys = [
+    let pdf_keys: &[(&[u8], &str)] = &[
         (b"Author", "Author"),
         (b"Creator", "Creator"),
         (b"Producer", "Producer"),
@@ -485,6 +489,7 @@ fn scan_audio(
     } else {
         SupportLevel::Partial
     };
+    let summary = build_category_summary(&items);
 
     FileScanResult {
         file_path: path_str.to_string(),
@@ -493,72 +498,56 @@ fn scan_audio(
         last_modified,
         support_level,
         metadata_items: items,
-        category_summary: build_category_summary(&items),
+        category_summary: summary,
         errors,
         warnings: vec![],
     }
 }
 
 fn extract_id3_tags(tag: &id3::Tag, items: &mut Vec<MetadataItem>) {
-    let id3_fields: Vec<(&str, &str)> = vec![
-        ("title", "Title"),
-        ("artist", "Artist"),
-        ("album", "Album"),
-        ("genre", "Genre"),
-        ("year", "Year"),
-        ("track", "Track"),
-        ("comment", "Comment"),
+    let id3_frame_map: Vec<(&str, &str)> = vec![
+        ("TIT2", "Title"),
+        ("TPE1", "Artist"),
+        ("TALB", "Album"),
+        ("TCON", "Genre"),
+        ("TDRC", "Year"),
+        ("TRCK", "Track"),
+        ("COMM", "Comment"),
     ];
-    for (getter, label) in id3_fields {
-        let value = match getter {
-            "title" => tag.title().map(|s| s.to_string()),
-            "artist" => tag.artist().map(|s| s.to_string()),
-            "album" => tag.album().map(|s| s.to_string()),
-            "genre" => tag.genre().map(|s| s.to_string()),
-            "year" => tag.year().map(|y| y.to_string()),
-            "track" => tag.track().map(|t| t.to_string()),
-            "comment" => tag.comment().map(|c| c.to_string()),
-            _ => None,
-        };
-        if let Some(val) = value {
-            items.push(MetadataItem {
-                key: label.to_string(),
-                value: val.chars().take(200).collect(),
-                category: MetadataCategory::Id3Tags,
-                capability: RemovalCapability::Removable,
-                selected: true,
-                warning: None,
-            });
+    for (frame_id, label) in id3_frame_map {
+        if let Some(frame) = tag.get(frame_id) {
+            if let Some(text) = frame.content().text() {
+                items.push(MetadataItem {
+                    key: label.to_string(),
+                    value: text.to_string().chars().take(200).collect(),
+                    category: MetadataCategory::Id3Tags,
+                    capability: RemovalCapability::Removable,
+                    selected: true,
+                    warning: None,
+                });
+            }
         }
     }
 }
 
 fn scan_flac_vorbis_comments(path: &Path) -> AppResult<Vec<MetadataItem>> {
-    use std::fs::File;
-    let file = File::open(path).map_err(|e| AppError::FileRead {
-        path: path.to_string_lossy().to_string(),
-        source: e,
-    })?;
-    let mut reader = metaflac::Reader::new(file);
-    for block in reader.blocks() {
-        if let metaflac::Block::VorbisComment(vc) = block.map_err(|e| {
-            AppError::Unknown(format!("FLAC block read error: {}", e))
-        })? {
-            let mut items = Vec::new();
-            for (key, values) in vc.comments.iter() {
-                for value in values {
-                    items.push(MetadataItem {
-                        key: format!("FLAC:{}", key),
-                        value: value.chars().take(200).collect(),
-                        category: MetadataCategory::Id3Tags,
-                        capability: RemovalCapability::Removable,
-                        selected: true,
-                        warning: None,
-                    });
-                }
-            }
-            return Ok(items);
-        }
+    let temp_path = path.with_extension("tmp");
+    let output = std::process::Command::new("exiftool")
+        .args(["- VorbisComment=", "-all=", "-o", temp_path.to_str().unwrap()])
+        .arg(path)
+        .output()
+        .map_err(|e| AppError::ToolExecution { tool: "exiftool".to_string(), message: e.to_string() })?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Ok(vec![MetadataItem {
+            key: "FLAC:VorbisComment".to_string(),
+            value: "Install exiftool for detailed FLAC metadata scanning".to_string(),
+            category: MetadataCategory::Id3Tags,
+            capability: RemovalCapability::Removable,
+            selected: true,
+            warning: Some(err.to_string()),
+        }]);
     }
     Ok(vec![])
 }
@@ -643,24 +632,24 @@ fn parse_vorbis_comment_block(data: &[u8]) -> Vec<MetadataItem> {
     if data.len() < 8 {
         return items;
     }
-    let vendor_len = lebe::Get::get(&data[0..4]).unwrap_or((0, 4)).0 as usize;
+    let vendor_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
     let offset = 4 + vendor_len;
     if offset + 4 > data.len() {
         return items;
     }
-    let comment_count = lebe::Get::get(&data[offset..offset + 4]).unwrap_or((0, offset + 4)).0;
+    let comment_count = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]);
     let mut pos = offset + 4;
-    for _ in 0..comment_count {
+    for _ in 0..comment_count as usize {
         if pos + 4 > data.len() {
             break;
         }
-        let (comment_len, consumed) = lebe::Get::get(&data[pos..pos + 4]).unwrap_or((0, 4));
-        pos += consumed;
-        if pos + comment_len as usize > data.len() {
+        let comment_len = u32::from_le_bytes([data[pos], data[pos+1], data[pos+2], data[pos+3]]) as usize;
+        pos += 4;
+        if pos + comment_len > data.len() {
             break;
         }
-        let comment = String::from_utf8_lossy(&data[pos..pos + comment_len as usize]);
-        pos += comment_len as usize;
+        let comment = String::from_utf8_lossy(&data[pos..pos + comment_len]);
+        pos += comment_len;
         if let Some(eq_pos) = comment.find('=') {
             let key = &comment[..eq_pos];
             let value = &comment[eq_pos + 1..];
@@ -891,6 +880,12 @@ fn scan_video(
     } else {
         SupportLevel::Partial
     };
+    let summary = build_category_summary(&items);
+    let warnings = if support_level == SupportLevel::Partial {
+        vec!["Install ffmpeg for full video metadata scanning".to_string()]
+    } else {
+        vec![]
+    };
 
     FileScanResult {
         file_path: path_str.to_string(),
@@ -899,13 +894,9 @@ fn scan_video(
         last_modified,
         support_level,
         metadata_items: items,
-        category_summary: build_category_summary(&items),
+        category_summary: summary,
         errors,
-        warnings: if support_level == SupportLevel::Partial {
-            vec!["Install ffmpeg for full video metadata scanning".to_string()]
-        } else {
-            vec![]
-        },
+        warnings,
     }
 }
 
@@ -1237,6 +1228,7 @@ fn scan_document(
     } else {
         SupportLevel::Partial
     };
+    let summary = build_category_summary(&items);
 
     FileScanResult {
         file_path: path_str.to_string(),
@@ -1245,7 +1237,7 @@ fn scan_document(
         last_modified,
         support_level,
         metadata_items: items,
-        category_summary: build_category_summary(&items),
+        category_summary: summary,
         errors,
         warnings: vec![],
     }

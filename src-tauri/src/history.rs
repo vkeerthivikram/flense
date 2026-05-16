@@ -50,8 +50,9 @@ const MIGRATIONS: &[&str] = &[
 /// Open or create the SQLite database.
 pub fn open_db(db_path: &Path) -> AppResult<Connection> {
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AppError::Database(rusqlite::Error::IoError(
-            std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        std::fs::create_dir_all(parent).map_err(|e| AppError::Unknown(format!(
+            "Failed to create db directory: {}",
+            e
         )))?;
     }
 
@@ -89,58 +90,49 @@ pub fn record_cleaning(
     hash_before: &str,
     hash_after: Option<&str>,
     metadata_summary: &[CategorySummary],
-    audit_logging: bool,
+    _audit_logging: bool,
 ) -> AppResult<i64> {
     let timestamp = Utc::now().to_rfc3339();
 
-    let id = conn
-        .call(
-            |db| {
-                let mut stmt = db.prepare(
-                    "INSERT INTO cleaning_history 
-                     (operation_id, file_path, backup_path, timestamp, hash_before, hash_after, operation_type, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'clean', 'success')",
-                )?;
+    conn.execute(
+        "INSERT INTO cleaning_history 
+         (operation_id, file_path, backup_path, timestamp, hash_before, hash_after, operation_type, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'clean', 'success')",
+        params![
+            operation_id,
+            file_path,
+            backup_path,
+            timestamp,
+            hash_before,
+            hash_after.unwrap_or(""),
+        ],
+    )
+    .map_err(AppError::Database)?;
 
-                stmt.insert(params![
-                    operation_id,
-                    file_path,
-                    backup_path,
-                    timestamp,
-                    hash_before,
-                    hash_after.unwrap_or(""),
-                ])?;
+    let history_id = conn.last_insert_rowid();
 
-                let history_id = db.last_insert_rowid();
+    for summary in metadata_summary {
+        let cat = serde_json::to_string(&summary.category)
+            .unwrap_or_else(|_| "unknown".to_string());
 
-                // Record category summaries (always stored, privacy-safe)
-                for summary in metadata_summary {
-                    let cat = serde_json::to_string(&summary.category)
-                        .unwrap_or_else(|_| "unknown".to_string());
-
-                    let mut cat_stmt = db.prepare(
-                        "INSERT INTO metadata_summary 
-                         (cleaning_history_id, category, item_count, removable_count, partial_count, read_only_count, unsupported_count)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    )?;
-
-                    cat_stmt.insert(params![
-                        history_id,
-                        cat,
-                        summary.item_count,
-                        summary.removable_count,
-                        summary.partial_count,
-                        summary.read_only_count,
-                        summary.unsupported_count,
-                    ])?;
-                }
-
-                Ok(history_id)
-            },
+        conn.execute(
+            "INSERT INTO metadata_summary 
+             (cleaning_history_id, category, item_count, removable_count, partial_count, read_only_count, unsupported_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                history_id,
+                cat,
+                summary.item_count,
+                summary.removable_count,
+                summary.partial_count,
+                summary.read_only_count,
+                summary.unsupported_count,
+            ],
         )
         .map_err(AppError::Database)?;
+    }
 
-    Ok(id)
+    Ok(history_id)
 }
 
 /// Record a failed cleaning operation.
@@ -234,7 +226,8 @@ pub fn get_history(conn: &Connection, limit: usize) -> AppResult<Vec<HistoryEntr
 
             // Load metadata summaries for this entry
             let history_id: i64 = row.get(0)?;
-            let metadata_summary = get_metadata_summary_for_entry(conn, history_id)?;
+            let metadata_summary = get_metadata_summary_for_entry(conn, history_id)
+                .unwrap_or_else(|_| Vec::new());
 
             Ok(HistoryEntry {
                 id: history_id,
@@ -252,13 +245,8 @@ pub fn get_history(conn: &Connection, limit: usize) -> AppResult<Vec<HistoryEntr
         })
         .map_err(AppError::Database)?;
 
-    entries.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppError::Database(rusqlite::Error::FromSqlConversion(
-            0,
-            "HistoryEntry".to_string(),
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
-        ))
-    })
+    entries.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Unknown(format!("History query failed: {}", e)))
 }
 
 fn get_metadata_summary_for_entry(

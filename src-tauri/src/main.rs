@@ -23,20 +23,13 @@ fn main() {
             ),
             cancelled: Mutex::new(false),
         })
-        .setup(|app| {
-            // Ensure data directory exists
+        .setup(|_app| {
             let data_dir = dirs::data_local_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("metadata-cleaner");
 
             if !data_dir.exists() {
                 let _ = std::fs::create_dir_all(&data_dir);
-            }
-
-            #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
             }
 
             Ok(())

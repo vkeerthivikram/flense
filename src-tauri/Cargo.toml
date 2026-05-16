@@ -8,6 +8,10 @@ repository = ""
 edition = "2021"
 rust-version = "1.77"
 
+[lib]
+name = "metadata_cleaner_lib"
+path = "src/lib.rs"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

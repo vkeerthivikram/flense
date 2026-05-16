@@ -1,7 +1,7 @@
 {
-  "productName": "Metadata Cleaner",
+  "productName": "Flense",
   "version": "0.1.0",
-  "identifier": "com.flense.app",
+  "identifier": "com.flense.dev",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "Metadata Cleaner",
+        "title": "Flense",
         "width": 1200,
         "height": 800,
         "resizable": true,
@@ -35,41 +35,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "bin/*"
-    ],
     "linux": {
       "deb": {
         "depends": ["libsqlite3-0"]
       }
-    },
-    "windows": {
-      "certificateThumbprint": null,
-      "digestAlgorithm": "sha256",
-      "timestampUrl": ""
-    },
-    "macOS": {
-      "frameworks": [],
-      "exceptionDomain": "",
-      "signingIdentity": null,
-      "entitlements": null
-    }
-  },
-  "plugins": {
-    "shell": {
-      "open": true,
-      "scope": [
-        {
-          "name": "exiftool",
-          "cmd": "**/exiftool*",
-          "sidecar": true
-        },
-        {
-          "name": "ffmpeg",
-          "cmd": "**/ffmpeg*",
-          "sidecar": true
-        }
-      ]
     }
   }
 }

@@ -235,13 +235,13 @@ fn clean_image_reencode(file_path: &Path, ext: &str) -> AppResult<()> {
         img.save_with_format(&temp_path, image::ImageFormat::Jpeg)
             .map_err(|e| AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             })?;
     } else {
         img.save_with_format(&temp_path, image::ImageFormat::Tiff)
             .map_err(|e| AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             })?;
     }
 
@@ -265,7 +265,7 @@ fn clean_png_metadata(file_path: &Path) -> AppResult<()> {
 
     let info = reader.info();
     let width = info.width;
-    let height = info.height();
+    let height = info.height;
     let color_type = info.color_type;
     let bit_depth = info.bit_depth;
 
@@ -285,19 +285,18 @@ fn clean_png_metadata(file_path: &Path) -> AppResult<()> {
     let mut encoder = png::Encoder::new(file_out, width, height);
     encoder.set_color(color_type);
     encoder.set_depth(bit_depth);
-    // Don't set any text chunks — this strips all metadata
 
     let mut writer = encoder.write_header().map_err(|e| {
         AppError::FileWrite {
             path: temp_path.to_string_lossy().to_string(),
-            source: e,
+            source: std::io::Error::new(std::io::ErrorKind::Other, e),
         }
     })?;
 
     writer.write_image_data(&pixel_data).map_err(|e| {
         AppError::FileWrite {
             path: temp_path.to_string_lossy().to_string(),
-            source: e,
+            source: std::io::Error::new(std::io::ErrorKind::Other, e),
         }
     })?;
 
@@ -366,7 +365,7 @@ fn clean_pdf(file_path: &Path, _items: &[&MetadataItem]) -> AppResult<()> {
         if let lopdf::Object::Reference(info_id) = info_ref {
             if let Ok(info_dict) = doc.get_object_mut(*info_id) {
                 if let lopdf::Object::Dictionary(ref mut dict) = info_dict {
-                    let keys_to_remove = vec![
+                    let keys_to_remove: &[&[u8]] = &[
                         b"Author", b"Creator", b"Producer", b"CreationDate",
                         b"ModDate", b"Title", b"Subject", b"Keywords",
                     ];
@@ -376,11 +375,6 @@ fn clean_pdf(file_path: &Path, _items: &[&MetadataItem]) -> AppResult<()> {
                 }
             }
         }
-    }
-
-    // Remove XMP metadata if present
-    if let Ok(xmp_id) = doc.get_object_id(b"Metadata") {
-        let _ = doc.delete_object(xmp_id);
     }
 
     let temp_path = file_path.with_extension("tmp");
@@ -403,10 +397,10 @@ fn clean_audio(file_path: &Path, _items: &[&MetadataItem]) -> AppResult<()> {
 
     match ext.as_str() {
         "mp3" => {
-            id3::Tag::remove_from_path(file_path, id3::Version::Id3v24)
+            id3::Tag::remove_from_path(file_path)
                 .map_err(|e| AppError::FileWrite {
                     path: file_path.to_string_lossy().to_string(),
-                    source: e,
+                    source: std::io::Error::new(std::io::ErrorKind::Other, e),
                 })?;
             Ok(())
         }
@@ -429,53 +423,11 @@ fn clean_audio(file_path: &Path, _items: &[&MetadataItem]) -> AppResult<()> {
     }
 }
 
-/// Remove all Vorbis comments from a FLAC file.
+/// Remove all Vorbis comments from a FLAC file using exiftool.
 fn clean_flac_metadata(file_path: &Path) -> AppResult<()> {
-    use std::fs::File;
-    let file = File::open(file_path).map_err(|e| AppError::FileRead {
-        path: file_path.to_string_lossy().to_string(),
-        source: e,
-    })?;
-    let mut reader = metaflac::Reader::new(file);
-    let mut found = false;
-    for block in reader.blocks() {
-        if let Ok(metaflac::Block::VorbisComment(ref mut vc)) = block {
-            vc.comments.clear();
-            found = true;
-            break;
-        }
-    }
-    if found {
-        let temp_path = file_path.with_extension("tmp");
-        let out_file = File::create(&temp_path).map_err(|e| AppError::FileWrite {
-            path: temp_path.to_string_lossy().to_string(),
-            source: e,
-        })?;
-        let mut writer = metaflac::Writer::new(out_file)
-            .map_err(|e| AppError::Unknown(format!("FLAC write init: {}", e)))?;
-        let file2 = File::open(file_path).map_err(|e| AppError::FileRead {
-            path: file_path.to_string_lossy().to_string(),
-            source: e,
-        })?;
-        let mut reader2 = metaflac::Reader::new(file2);
-        for block_result in reader2.blocks() {
-            if let Ok(block) = block_result {
-                writer.write_block(&block).map_err(|e| {
-                    AppError::FileWrite {
-                        path: temp_path.to_string_lossy().to_string(),
-                        source: e,
-                    }
-                })?;
-            }
-        }
-        writer.finish().map_err(|e| AppError::FileWrite {
-            path: temp_path.to_string_lossy().to_string(),
-            source: e,
-        })?;
-        atomic_replace(file_path, &temp_path)
-    } else {
-        Ok(())
-    }
+    let temp_path = file_path.with_extension("tmp");
+    exiftool_clean(file_path, &temp_path)?;
+    atomic_replace(file_path, &temp_path)
 }
 
 /// Remove Vorbis comments from an OGG file by rebuilding it.
@@ -853,21 +805,21 @@ fn clean_office_metadata(file_path: &Path) -> AppResult<()> {
         writer.start_file(name, options).map_err(|e| {
             AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             }
         })?;
 
         writer.write_all(content).map_err(|e| {
             AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             }
         })?;
     }
 
     writer.finish().map_err(|e| AppError::FileWrite {
         path: temp_path.to_string_lossy().to_string(),
-        source: e,
+        source: std::io::Error::new(std::io::ErrorKind::Other, e),
     })?;
 
     atomic_replace(file_path, &temp_path)
@@ -929,20 +881,20 @@ fn clean_odf_metadata(file_path: &Path) -> AppResult<()> {
         writer.start_file(name, options).map_err(|e| {
             AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             }
         })?;
         writer.write_all(content).map_err(|e| {
             AppError::FileWrite {
                 path: temp_path.to_string_lossy().to_string(),
-                source: e,
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
             }
         })?;
     }
 
     writer.finish().map_err(|e| AppError::FileWrite {
         path: temp_path.to_string_lossy().to_string(),
-        source: e,
+        source: std::io::Error::new(std::io::ErrorKind::Other, e),
     })?;
 
     atomic_replace(file_path, &temp_path)
