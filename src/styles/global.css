@@ -1,29 +1,45 @@
 :root {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --bg-hover: #30363d;
-  --bg-active: #388bfd26;
+  --surface-base: #060a0b;
+  --surface-raised: #080c0e;
+  --surface-overlay: #0d1214;
 
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-muted: #6e7681;
+  --text-brand: #00d084;
+  --text-body: #e6edf3;
+  --text-label: #a0b0a8;
+  --text-muted-dark: #3a5a4a;
+  --text-muted-light: #2a4040;
 
-  --border-color: #30363d;
-  --border-focus: #388bfd;
+  --accent-primary: #00d084;
+  --accent-danger: #f85149;
+  --accent-warning: #d29922;
 
-  --accent: #58a6ff;
-  --accent-hover: #79b8ff;
-  --success: #3fb950;
-  --warning: #d29922;
-  --error: #f85149;
+  --border-subtle: #1a2525;
+  --border-default: #2a3a3a;
+  --border-focus: #00d084;
 
-  --radius: 8px;
-  --radius-sm: 4px;
-  --radius-lg: 12px;
+  --bg-primary: var(--surface-base);
+  --bg-secondary: var(--surface-raised);
+  --bg-tertiary: var(--surface-overlay);
+  --bg-hover: #1a2525;
+  --bg-active: #00d0841a;
 
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --text-primary: var(--text-body);
+  --text-secondary: var(--text-label);
+  --text-muted: var(--text-muted-dark);
+
+  --border-color: var(--border-default);
+  --accent: var(--accent-primary);
+  --accent-hover: #00e892;
+  --success: var(--accent-primary);
+  --warning: var(--accent-warning);
+  --error: var(--accent-danger);
+
+  --radius: 4px;
+  --radius-sm: 2px;
+  --radius-lg: 6px;
+
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.6);
 
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
@@ -35,6 +51,9 @@
   --spacing-xl: 24px;
   --spacing-2xl: 32px;
   --spacing-3xl: 48px;
+
+  --transition-fast: 100ms ease;
+  --transition-normal: 150ms ease;
 }
 
 *,
@@ -74,11 +93,11 @@ button {
   font-weight: 500;
   border-radius: var(--radius);
   padding: 8px 16px;
-  transition: all 150ms ease;
+  transition: all var(--transition-fast);
 }
 
 button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
@@ -98,7 +117,7 @@ textarea {
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   outline: none;
-  transition: border-color 150ms ease;
+  transition: border-color var(--transition-fast);
 }
 
 input:focus,
@@ -126,7 +145,7 @@ textarea:focus {
 }
 
 ::selection {
-  background: var(--accent);
+  background: var(--accent-primary);
   color: var(--bg-primary);
 }
 

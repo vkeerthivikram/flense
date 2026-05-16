@@ -328,6 +328,18 @@ pub fn prune_history(conn: &Connection, days_old: i64) -> AppResult<usize> {
     Ok(deleted)
 }
 
+// ──────────────────────────── Clear History ─────────────────────────────────
+
+/// Clear all history entries from the database.
+pub fn clear_history(conn: &Connection) -> AppResult<usize> {
+    conn.execute("DELETE FROM metadata_summary", [])
+        .map_err(AppError::Database)?;
+    let deleted = conn
+        .execute("DELETE FROM cleaning_history", [])
+        .map_err(AppError::Database)?;
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
