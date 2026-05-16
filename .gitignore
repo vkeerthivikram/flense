@@ -4,3 +4,5 @@ dist/
 *.bak
 *.tmp
 .DS_Store
+.worktrees/
+.superpowers/
