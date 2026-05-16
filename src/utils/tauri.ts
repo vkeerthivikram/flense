@@ -41,6 +41,10 @@ export async function restoreFile(filePath: string): Promise<string> {
   return invoke<string>('restore_file_cmd', { filePath })
 }
 
+export async function clearHistory(): Promise<void> {
+  return invoke<void>('clear_history_cmd')
+}
+
 // ─── Tools ──────────────────────────────────────────────────────────────────
 
 export async function detectTools(): Promise<ToolStatus[]> {

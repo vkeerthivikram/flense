@@ -11,7 +11,7 @@ use tauri::{Emitter, State};
 use crate::cleaner::{clean_file, hash_file};
 use crate::errors::AppError;
 use crate::external_tools::detect_tool;
-use crate::history::{get_history as db_get_history, open_db, record_cleaning, record_restore, get_latest_backup};
+use crate::history::{clear_history as db_clear_history, get_history as db_get_history, open_db, record_cleaning, record_restore, get_latest_backup};
 use crate::metadata_scanner::{collect_files, scan_file};
 use crate::types::{
     AppSettings, BatchCleanResult, BatchScanResult, CleanConfig, FileScanResult, HistoryEntry,
@@ -293,4 +293,10 @@ pub async fn reset_cancel(state: State<'_, AppState>) -> Result<(), String> {
     let mut cancelled = state.cancelled.lock().map_err(|e| e.to_string())?;
     *cancelled = false;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_history_cmd(state: State<'_, AppState>) -> Result<usize, String> {
+    let db = open_db(&state.db_path).map_err(|e| e.to_user_message())?;
+    db_clear_history(&db).map_err(|e| e.to_user_message())
 }
