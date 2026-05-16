@@ -116,7 +116,21 @@ function AppContent() {
     const files = Array.from(e.dataTransfer.files)
     if (files.length === 0) return
 
-    const paths = files.map((f) => (f as any).path || f.name)
+    const supported = files.filter((f) => {
+      const ext = (f.name || '').split('.').pop()?.toLowerCase() || ''
+      return ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'webp', 'bmp', 'pdf', 'mp3', 'flac', 'ogg', 'wav', 'm4a', 'aac', 'wma', 'mp4', 'avi', 'mkv', 'mov', 'wmv', 'webm', 'm4v', 'docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'].includes(ext)
+    })
+
+    if (supported.length === 0) {
+      addToast('No supported files found. Drop images, PDFs, audio, video, or documents.', 'error')
+      return
+    }
+
+    if (supported.length < files.length) {
+      addToast(`Skipped ${files.length - supported.length} unsupported files`, 'info')
+    }
+
+    const paths = supported.map((f) => (f as any).path || f.name)
     await runScan(paths)
   }, [])
 

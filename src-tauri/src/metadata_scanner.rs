@@ -531,25 +531,58 @@ fn extract_id3_tags(tag: &id3::Tag, items: &mut Vec<MetadataItem>) {
 }
 
 fn scan_flac_vorbis_comments(path: &Path) -> AppResult<Vec<MetadataItem>> {
-    let temp_path = path.with_extension("tmp");
     let output = std::process::Command::new("exiftool")
-        .args(["- VorbisComment=", "-all=", "-o", temp_path.to_str().unwrap()])
-        .arg(path)
+        .args(["-json", "-G", path.to_str().unwrap_or("")])
         .output()
         .map_err(|e| AppError::ToolExecution { tool: "exiftool".to_string(), message: e.to_string() })?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Ok(vec![MetadataItem {
-            key: "FLAC:VorbisComment".to_string(),
-            value: "Install exiftool for detailed FLAC metadata scanning".to_string(),
-            category: MetadataCategory::Id3Tags,
-            capability: RemovalCapability::Removable,
-            selected: true,
-            warning: Some(err.to_string()),
-        }]);
+        if err.contains("not found") || err.contains("No such file") {
+            return Ok(vec![MetadataItem {
+                key: "FLAC:VorbisComment".to_string(),
+                value: "exiftool not installed — cannot scan FLAC metadata".to_string(),
+                category: MetadataCategory::Id3Tags,
+                capability: RemovalCapability::Partial,
+                selected: true,
+                warning: Some("Install exiftool to enable FLAC scanning".to_string()),
+            }]);
+        }
+        return Ok(vec![]);
     }
-    Ok(vec![])
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.trim().is_empty() || stdout.trim() == "[]" {
+        return Ok(vec![]);
+    }
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| AppError::Unknown(format!("Failed to parse exiftool JSON: {}", e)))?;
+
+    let mut items = Vec::new();
+    if let Some(arr) = parsed.as_array() {
+        for entry in arr {
+            if let Some(obj) = entry.get("VorbisComment").or_else(|| entry.get("RIFFINFO")) {
+                if let Some(obj_map) = obj.as_object() {
+                    for (key, value) in obj_map {
+                        let value_str = match value {
+                            serde_json::Value::String(s) => s.clone(),
+                            _ => value.to_string(),
+                        };
+                        items.push(MetadataItem {
+                            key: format!("FLAC:{}", key),
+                            value: value_str.chars().take(200).collect(),
+                            category: MetadataCategory::Id3Tags,
+                            capability: RemovalCapability::Removable,
+                            selected: true,
+                            warning: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(items)
 }
 
 fn scan_ogg_vorbis_comments(path: &Path) -> AppResult<Vec<MetadataItem>> {
